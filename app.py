@@ -9,6 +9,8 @@ Config (env vars, defaults shown):
   KT_PORT=8882          bind port
   KT_TITLE=<session>    browser tab title
   KT_SECURE=            set to 1 when served over HTTPS, to mark the CSRF cookie Secure
+  KT_AUTH_HEADER=       optional: require this request header (set by your trusted proxy)
+  KT_AUTH_SECRET=       optional: the value that header must equal (defense in depth)
 
 WARNING: this exposes a WRITABLE terminal == remote code execution. Bind to 127.0.0.1
 and always put it behind authentication (Cloudflare Access, an authenticated reverse
@@ -22,7 +24,8 @@ cross-origin page from driving the terminal using your authenticated session -- 
 alone does NOT stop that, since the browser attaches your auth cookie automatically.
 The token is plain HTML (no JS), so it still works on a 2010 Kindle browser. (CSRF does
 NOT protect against an attacker who can reach the port directly and craft the whole
-request -- e.g. a co-located container; that is an isolation concern, not a CSRF one.)
+request -- e.g. a co-located container; for that, set KT_AUTH_HEADER/KT_AUTH_SECRET and
+have your trusted proxy inject the header, and/or isolate the port.)
 """
 import os, subprocess, html, urllib.parse, hashlib, secrets
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -33,6 +36,11 @@ PORT    = int(os.environ.get("KT_PORT", "8882"))
 TITLE   = os.environ.get("KT_TITLE", SESSION)
 SECURE  = os.environ.get("KT_SECURE", "") not in ("", "0", "false", "no")
 MAX_BODY = 65536  # keystroke POSTs are tiny; reject anything larger
+# Optional defense-in-depth: require a secret header that only your trusted proxy
+# (e.g. a Cloudflare Transform Rule) injects, so a process reaching the port directly
+# (a co-located container) is rejected. Leave unset to disable.
+AUTH_HEADER = os.environ.get("KT_AUTH_HEADER", "")
+AUTH_SECRET = os.environ.get("KT_AUTH_SECRET", "")
 
 def tmux(*a):
     return subprocess.run(["tmux", *a], capture_output=True, text=True)
@@ -141,6 +149,14 @@ class H(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
+    def _edge_ok(self):
+        # When configured, require the proxy-injected secret header on every request.
+        # A process reaching the port directly (bypassing the proxy) won't have it.
+        if not (AUTH_HEADER and AUTH_SECRET):
+            return True
+        got = self.headers.get(AUTH_HEADER, "")
+        return bool(got) and secrets.compare_digest(got, AUTH_SECRET)
+
     def _page(self):
         tok = cookie_val(self.headers, "kt_csrf")
         cookies = None
@@ -163,11 +179,15 @@ class H(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        if not self._edge_ok():
+            self._deny(403); return
         if self.path.startswith("/help"):
             self._send(HELP); return
         ensure(); self._page()
 
     def do_POST(self):
+        if not self._edge_ok():
+            self._deny(403); return
         n = int(self.headers.get("Content-Length", "0") or 0)
         if n < 0 or n > MAX_BODY:
             self._deny(413); return
