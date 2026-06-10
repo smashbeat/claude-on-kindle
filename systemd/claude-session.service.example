@@ -3,6 +3,10 @@ Description=persistent tmux session for kindle-term
 After=network.target
 
 [Service]
+# Run as the SAME unprivileged user as kindle-term.service (not root), so the terminal
+# you drive from the browser is that user, not root.
+User=kindle
+Group=kindle
 Type=oneshot
 RemainAfterExit=yes
 # creates the session at boot if missing (change "claude" to your KT_SESSION)

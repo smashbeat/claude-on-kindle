@@ -24,7 +24,9 @@ This serves a **writable terminal**, i.e. **remote code execution** for anyone w
 
 - Keep it bound to **`127.0.0.1`** (the default).
 - **Always** put authentication in front — Cloudflare Access, an authenticated reverse proxy, or a VPN. Never expose it raw to the internet.
-- The POST endpoints are **CSRF-protected** (double-submit token: a cookie + a hidden form field that must match), so a cross-origin page can't drive your terminal using your authenticated session. Note that auth alone does **not** stop CSRF — the browser attaches your auth cookie automatically — which is why the token is built in.
+- The POST endpoints are **CSRF-protected** (double-submit token: a cookie + a hidden form field that must match), so a cross-origin page can't drive your terminal using your authenticated session. Note that auth alone does **not** stop CSRF — the browser attaches your auth cookie automatically — which is why the token is built in. The cookie is `HttpOnly; SameSite=Strict`, and `Secure` when you set `KT_SECURE=1` (do that behind HTTPS).
+- **`127.0.0.1` is not a boundary against *co-located* processes.** Anything else on the host that can reach loopback — another local service, or a `--network=host` Docker container (bridge-networked containers can't, by default) — can POST to the port **directly, bypassing your auth proxy entirely**. CSRF can't help there: such an attacker crafts the whole request. If the host also runs internet-facing services (a media server, cloud storage, …), treat a compromise of those as a path to this terminal. Mitigate: run it where nothing untrusted shares the host; ensure no container is host-networked; firewall the port off other interfaces; and/or require a secret header that only your trusted proxy injects.
+- **Run it as a non-root user** (see the `systemd/` examples). Otherwise a bug — or the path above — is a *root* shell, not a contained account.
 
 ## Quick start (local)
 

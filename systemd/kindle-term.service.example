@@ -4,13 +4,27 @@ After=network.target claude-session.service
 Wants=claude-session.service
 
 [Service]
+# Run as an UNPRIVILEGED user, never root. RCE-by-the-authenticated-user should be
+# that user, not root. Create it once, e.g.:  useradd -r -m -s /bin/bash kindle
+# Run claude-session.service as the SAME user so the tmux session isn't root either.
+User=kindle
+Group=kindle
+NoNewPrivileges=yes
+
 Environment=KT_SESSION=claude
 Environment=KT_HOST=127.0.0.1
 Environment=KT_PORT=8882
+# set when served over HTTPS (e.g. behind a Cloudflare Tunnel) so the CSRF cookie is Secure:
+Environment=KT_SECURE=1
 # adjust the path to wherever you put app.py
 ExecStart=/usr/bin/python3 /opt/kindle-term/app.py
 Restart=always
 RestartSec=2
+
+# Stronger sandboxing is possible but must account for the tmux socket the app and
+# claude-session.service share (default /tmp/tmux-<uid>/). In particular do NOT add
+# PrivateTmp=yes unless both units share the same private /tmp, or they won't see the
+# same tmux socket. ProtectSystem=strict needs the tmux socket dir in ReadWritePaths.
 
 [Install]
 WantedBy=multi-user.target

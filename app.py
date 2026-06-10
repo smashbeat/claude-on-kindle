@@ -8,16 +8,21 @@ Config (env vars, defaults shown):
   KT_HOST=127.0.0.1     bind address  (KEEP localhost; put auth in front)
   KT_PORT=8882          bind port
   KT_TITLE=<session>    browser tab title
+  KT_SECURE=            set to 1 when served over HTTPS, to mark the CSRF cookie Secure
 
 WARNING: this exposes a WRITABLE terminal == remote code execution. Bind to 127.0.0.1
 and always put it behind authentication (Cloudflare Access, an authenticated reverse
-proxy, or a VPN). Never expose it directly to the internet.
+proxy, or a VPN). Never expose it directly to the internet. Note that "bound to
+127.0.0.1" is NOT a boundary against other processes/containers on the same host --
+see README "Deployment security". Run it as a non-root user.
 
 CSRF: because the POST endpoints inject keystrokes, they are protected with a
 double-submit token (a cookie + a hidden form field that must match). This blocks a
 cross-origin page from driving the terminal using your authenticated session -- auth
 alone does NOT stop that, since the browser attaches your auth cookie automatically.
-The token is plain HTML (no JS), so it still works on a 2010 Kindle browser.
+The token is plain HTML (no JS), so it still works on a 2010 Kindle browser. (CSRF does
+NOT protect against an attacker who can reach the port directly and craft the whole
+request -- e.g. a co-located container; that is an isolation concern, not a CSRF one.)
 """
 import os, subprocess, html, urllib.parse, hashlib, secrets
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -26,6 +31,8 @@ SESSION = os.environ.get("KT_SESSION", "claude")
 HOST    = os.environ.get("KT_HOST", "127.0.0.1")
 PORT    = int(os.environ.get("KT_PORT", "8882"))
 TITLE   = os.environ.get("KT_TITLE", SESSION)
+SECURE  = os.environ.get("KT_SECURE", "") not in ("", "0", "false", "no")
+MAX_BODY = 65536  # keystroke POSTs are tiny; reject anything larger
 
 def tmux(*a):
     return subprocess.run(["tmux", *a], capture_output=True, text=True)
@@ -116,6 +123,9 @@ h2{font-size:20px;border-bottom:1px solid #000;margin-top:18px}
 </body></html>"""
 
 class H(BaseHTTPRequestHandler):
+    server_version = "kt"      # don't advertise BaseHTTP/Python versions
+    sys_version = ""
+
     def _send(self, body, cookies=None):
         b = body.encode()
         self.send_response(200)
@@ -136,7 +146,10 @@ class H(BaseHTTPRequestHandler):
         cookies = None
         if not tok:
             tok = secrets.token_urlsafe(16)
-            cookies = ["kt_csrf=%s; Path=/; SameSite=Strict; Max-Age=31536000" % tok]
+            flags = "Path=/; SameSite=Strict; HttpOnly; Max-Age=31536000"
+            if SECURE:
+                flags += "; Secure"
+            cookies = ["kt_csrf=%s; %s" % (tok, flags)]
         scr = capture()
         h = hashlib.md5(scr.encode()).hexdigest()[:12]
         self._send(PAGE.replace("__TITLE__", html.escape(TITLE))
@@ -156,6 +169,8 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         n = int(self.headers.get("Content-Length", "0") or 0)
+        if n < 0 or n > MAX_BODY:
+            self._deny(413); return
         d = urllib.parse.parse_qs(self.rfile.read(n).decode())
         # CSRF: the hidden form token must match the cookie (double-submit).
         cookie_tok = cookie_val(self.headers, "kt_csrf")
@@ -163,16 +178,18 @@ class H(BaseHTTPRequestHandler):
         if not cookie_tok or not secrets.compare_digest(cookie_tok, form_tok):
             self._deny(403); return
         ensure()
+        # `--` stops tmux option parsing, so a value starting with `-` is treated
+        # as keys/text, never as a tmux flag.
         if self.path == "/send":
             t = d.get("text", [""])[0]
             if t:
-                tmux("send-keys", "-t", SESSION, "-l", t)
+                tmux("send-keys", "-t", SESSION, "-l", "--", t)
             if d.get("enter", ["1"])[0] == "1":
                 tmux("send-keys", "-t", SESSION, "Enter")
         elif self.path == "/key":
             k = d.get("k", [""])[0]
             if k:
-                tmux("send-keys", "-t", SESSION, k)
+                tmux("send-keys", "-t", SESSION, "--", k)
         self._redir("/?watch=1")
 
     def log_message(self, *a):
