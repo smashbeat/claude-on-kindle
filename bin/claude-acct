@@ -1,0 +1,39 @@
+#!/bin/sh
+# claude-acct -- swap the Claude Code login between saved account snapshots,
+# leaving your MCP/plugin logins untouched.
+#
+# One-time setup per account: log in with `claude` (/login), then snapshot it:
+#
+#   mkdir -p ~/.claude/creds
+#   python3 - <<'PY'
+#   import json, os
+#   d = json.load(open(os.path.expanduser("~/.claude/.credentials.json")))
+#   json.dump({"claudeAiOauth": d["claudeAiOauth"]},
+#             open(os.path.expanduser("~/.claude/creds/work.json"), "w"))
+#   PY
+#
+# Repeat for each account (e.g. "personal.json"). Then:
+#   claude-acct work        # swap the active login to the "work" snapshot
+#   claude-acct             # show the current account
+DIR="$HOME/.claude/creds"
+
+case "$1" in
+  ""|-h|--help)
+    python3 -c "import json,os;print('current:',json.load(open(os.path.expanduser('~/.claude/.credentials.json'))).get('claudeAiOauth',{}).get('subscriptionType'))" 2>/dev/null
+    echo "usage: claude-acct <name>   (snapshots live in $DIR/<name>.json)"
+    ;;
+  *)
+    [ -f "$DIR/$1.json" ] || { echo "no snapshot: $DIR/$1.json"; exit 1; }
+    python3 - "$1" <<'PY'
+import json, os, sys
+a = sys.argv[1]
+cred = os.path.expanduser("~/.claude/.credentials.json")
+snap = os.path.expanduser("~/.claude/creds/%s.json" % a)
+d = json.load(open(cred)); s = json.load(open(snap))
+d["claudeAiOauth"] = s["claudeAiOauth"]
+json.dump(d, open(cred, "w")); os.chmod(cred, 0o600)
+print("Claude account -> %s (%s)" % (a, s["claudeAiOauth"].get("subscriptionType")))
+PY
+    echo "restart Claude to apply."
+    ;;
+esac

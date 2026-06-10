@@ -1,0 +1,3 @@
+#!/bin/sh
+# switch to the "work" account snapshot and launch Claude
+claude-acct work && exec claude "$@"

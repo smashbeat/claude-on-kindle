@@ -1,0 +1,14 @@
+[Unit]
+Description=cloudflared tunnel for kindle-term
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# file holding:  TUNNEL_TOKEN=...   (chmod 600, NOT committed)
+EnvironmentFile=/etc/kindle-term/tunnel.env
+ExecStart=/usr/local/bin/cloudflared tunnel run
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,16 @@
+[Unit]
+Description=kindle-term (tmux web terminal, localhost only)
+After=network.target claude-session.service
+Wants=claude-session.service
+
+[Service]
+Environment=KT_SESSION=claude
+Environment=KT_HOST=127.0.0.1
+Environment=KT_PORT=8882
+# adjust the path to wherever you put app.py
+ExecStart=/usr/bin/python3 /opt/kindle-term/app.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

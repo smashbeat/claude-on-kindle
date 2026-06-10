@@ -1,0 +1,13 @@
+[Unit]
+Description=persistent tmux session for kindle-term
+After=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# creates the session at boot if missing (change "claude" to your KT_SESSION)
+ExecStart=/bin/sh -c '/usr/bin/tmux has-session -t claude 2>/dev/null || /usr/bin/tmux new-session -d -s claude'
+ExecStop=/usr/bin/tmux kill-session -t claude
+
+[Install]
+WantedBy=multi-user.target

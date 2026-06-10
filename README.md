@@ -1,0 +1,66 @@
+# kindle-term
+
+Drive a terminal — or a live **Claude Code** session — from a **2010 Kindle**, or honestly any browser back to ~2009. No WebSocket, no JS framework, no canvas. Just HTML, forms, and `tmux`.
+
+> Built because the Kindle 3 e-ink browser (`AppleWebKit/531`, 2010) renders HTML and runs basic JS, but has **no WebGL and no working WebSocket** — so every modern web terminal (ttyd, Blit, wetty, gotty) shows a blank page. This one is dumb on purpose and just works.
+
+## How it works
+
+```
+your browser ─▶ [auth: Cloudflare Access / reverse proxy] ─▶ [cloudflared tunnel]
+             ─▶ app.py (127.0.0.1:8882) ─▶ tmux session ─▶ your shell / Claude Code
+```
+
+- `app.py` reads the visible `tmux` pane with `tmux capture-pane` and renders it inside a `<pre>`.
+- Buttons POST keystrokes, which are injected with `tmux send-keys`.
+- A content-hash **auto-refresh** keeps reloading while the screen is changing (so you watch output stream in) and **auto-stops** once it goes still — friendly to e-ink, which hates constant redraws.
+- ~90 lines, **Python standard library only**, zero dependencies.
+
+## ⚠️ Security — read this
+
+This serves a **writable terminal**, i.e. **remote code execution** for anyone who can reach it.
+
+- Keep it bound to **`127.0.0.1`** (the default).
+- **Always** put authentication in front — Cloudflare Access, an authenticated reverse proxy, or a VPN. Never expose it raw to the internet.
+
+## Quick start (local)
+
+```bash
+tmux new-session -d -s claude          # or any session name
+python3 app.py                         # serves http://127.0.0.1:8882
+# open http://127.0.0.1:8882 in a browser on the same machine
+```
+
+Config via env vars (defaults shown): `KT_SESSION=claude`, `KT_HOST=127.0.0.1`, `KT_PORT=8882`, `KT_TITLE=<session>`.
+
+## Remote access (the Kindle use case)
+
+1. Run `app.py` bound to localhost — see `systemd/kindle-term.service.example`.
+2. Expose it with a **Cloudflare Tunnel**: install `cloudflared`, create a named tunnel, add a Public Hostname → `http://localhost:8882`. The token goes in an env file (`.env.example`, `systemd/cloudflared.service.example`). No inbound ports are opened.
+3. Gate it with **Cloudflare Access**: add a self-hosted application for your hostname with a policy (Google SSO, one-time PIN, your IdP, …). Now only you can reach it.
+
+For a tmux session that survives reboots, see `systemd/claude-session.service.example`.
+
+## Controls
+
+| Button | Does |
+|---|---|
+| **Send⏎** | send your typed text **+ Enter** (submit) |
+| **Send** | send your text **without** Enter |
+| **Enter / ↑ / ↓ / Esc / Tab / ^C / ⌫** | send that single key (history, menus, interrupt, …) |
+| **↻ Refresh** | re-read the screen once |
+| **▶ Watch** | auto-refresh while the screen changes, auto-stop when idle |
+
+A full in-app guide lives at `/help`.
+
+## Bonus: Claude account switcher (optional)
+
+If you drive **Claude Code** and keep two accounts (e.g. work + personal) and don't want to mix them, `bin/claude-acct` snapshots and swaps the Claude login (`~/.claude/.credentials.json`) cleanly — leaving your MCP/plugin logins untouched — and `bin/cwork` / `bin/cpers` switch + relaunch. Claude-specific; skip it if you're driving a plain shell. Setup is in the header of `bin/claude-acct`.
+
+## Why "dumb on purpose"
+
+Capability probe on a Kindle 3 (`AppleWebKit/531`, 2010): HTML ✓, basic JS ✓, **WebGL ✗, WebSocket ✗**. Modern web terminals stream over a WebSocket; this one never opens one — it's plain page loads and `tmux`. That's the whole trick.
+
+## License
+
+MIT © Alessandro Grassi

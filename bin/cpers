@@ -1,0 +1,3 @@
+#!/bin/sh
+# switch to the "personal" account snapshot and launch Claude
+claude-acct personal && exec claude "$@"

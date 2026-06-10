@@ -1,0 +1,14 @@
+# secrets / runtime config — never commit
+.env
+*.env
+!.env.example
+tunnel.env
+.credentials.json
+creds/
+
+# python
+__pycache__/
+*.pyc
+
+# misc
+.DS_Store
