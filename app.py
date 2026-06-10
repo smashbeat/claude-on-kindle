@@ -12,8 +12,14 @@ Config (env vars, defaults shown):
 WARNING: this exposes a WRITABLE terminal == remote code execution. Bind to 127.0.0.1
 and always put it behind authentication (Cloudflare Access, an authenticated reverse
 proxy, or a VPN). Never expose it directly to the internet.
+
+CSRF: because the POST endpoints inject keystrokes, they are protected with a
+double-submit token (a cookie + a hidden form field that must match). This blocks a
+cross-origin page from driving the terminal using your authenticated session -- auth
+alone does NOT stop that, since the browser attaches your auth cookie automatically.
+The token is plain HTML (no JS), so it still works on a 2010 Kindle browser.
 """
-import os, subprocess, html, urllib.parse, hashlib
+import os, subprocess, html, urllib.parse, hashlib, secrets
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 SESSION = os.environ.get("KT_SESSION", "claude")
@@ -32,6 +38,13 @@ def capture():
     r = tmux("capture-pane", "-p", "-t", SESSION)
     return r.stdout if r.returncode == 0 else "[no tmux session %r: %s]" % (SESSION, r.stderr.strip())
 
+def cookie_val(headers, name):
+    for part in headers.get("Cookie", "").split(";"):
+        k, _, v = part.strip().partition("=")
+        if k == name:
+            return v
+    return ""
+
 PAGE = r"""<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>__TITLE__</title><style>
 body{background:#fff;color:#000;font-family:monospace;font-size:18px;margin:6px}
@@ -42,12 +55,12 @@ form{margin:4px 0;display:inline}
 #st{color:#555} a{color:#000}
 </style></head><body>
 <pre>__SCREEN__</pre>
-<form method="post" action="/send">
+<form method="post" action="/send"><input type="hidden" name="csrf" value="__CSRF__">
 <input type="text" id="cmd" name="text" autocomplete="off" placeholder="type then Send">
 <button name="enter" value="1">Send&#9166;</button>
 <button name="enter" value="0">Send</button></form>
 <div>
-<form method="post" action="/key"><button name="k" value="Enter">Enter</button>
+<form method="post" action="/key"><input type="hidden" name="csrf" value="__CSRF__"><button name="k" value="Enter">Enter</button>
 <button name="k" value="Up">&#8593;</button><button name="k" value="Down">&#8595;</button>
 <button name="k" value="Escape">Esc</button><button name="k" value="Tab">Tab</button>
 <button name="k" value="C-c">^C</button><button name="k" value="BSpace">&#9003;</button></form>
@@ -103,20 +116,33 @@ h2{font-size:20px;border-bottom:1px solid #000;margin-top:18px}
 </body></html>"""
 
 class H(BaseHTTPRequestHandler):
-    def _send(self, body):
+    def _send(self, body, cookies=None):
         b = body.encode()
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(b)))
+        for c in (cookies or []):
+            self.send_header("Set-Cookie", c)
         self.end_headers()
         self.wfile.write(b)
 
+    def _deny(self, code=403):
+        self.send_response(code)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def _page(self):
+        tok = cookie_val(self.headers, "kt_csrf")
+        cookies = None
+        if not tok:
+            tok = secrets.token_urlsafe(16)
+            cookies = ["kt_csrf=%s; Path=/; SameSite=Strict; Max-Age=31536000" % tok]
         scr = capture()
         h = hashlib.md5(scr.encode()).hexdigest()[:12]
         self._send(PAGE.replace("__TITLE__", html.escape(TITLE))
                        .replace("__HASH__", h)
-                       .replace("__SCREEN__", html.escape(scr)))
+                       .replace("__CSRF__", tok)
+                       .replace("__SCREEN__", html.escape(scr)), cookies)
 
     def _redir(self, loc):
         self.send_response(303)
@@ -129,9 +155,14 @@ class H(BaseHTTPRequestHandler):
         ensure(); self._page()
 
     def do_POST(self):
-        ensure()
         n = int(self.headers.get("Content-Length", "0") or 0)
         d = urllib.parse.parse_qs(self.rfile.read(n).decode())
+        # CSRF: the hidden form token must match the cookie (double-submit).
+        cookie_tok = cookie_val(self.headers, "kt_csrf")
+        form_tok = d.get("csrf", [""])[0]
+        if not cookie_tok or not secrets.compare_digest(cookie_tok, form_tok):
+            self._deny(403); return
+        ensure()
         if self.path == "/send":
             t = d.get("text", [""])[0]
             if t:

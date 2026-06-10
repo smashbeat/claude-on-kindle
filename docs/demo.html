@@ -1,0 +1,35 @@
+<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>claude</title><style>
+body{background:#fff;color:#000;font-family:monospace;font-size:18px;margin:6px}
+pre{white-space:pre-wrap;word-wrap:break-word;border:1px solid #000;padding:6px}
+input[type=text]{width:62%;font-size:20px;padding:6px}
+button{font-size:18px;padding:8px 10px;margin:2px}
+form{margin:4px 0;display:inline}
+#st{color:#555} a{color:#000}
+</style></head><body>
+<!-- Static demo of the kindle-term UI (no real session content). Used for the README screenshot. -->
+<pre>● Welcome to Claude Code  —  ~/projects/garden-api
+
+❯ how do I find the biggest files under this folder?
+
+● Use du, sorted by size:
+
+    du -ah . | sort -rh | head -20
+
+  That walks the current directory, prints human-readable sizes,
+  largest first. Add --max-depth=1 to show only top-level entries.
+
+❯ ▌
+</pre>
+<form><input type="text" value="" placeholder="type then Send">
+<button>Send&#9166;</button><button>Send</button></form>
+<div>
+<form><button>Enter</button>
+<button>&#8593;</button><button>&#8595;</button>
+<button>Esc</button><button>Tab</button>
+<button>^C</button><button>&#9003;</button></form>
+<form><button>&#8635; Refresh</button></form>
+<form><button>&#9654; Watch</button></form>
+<span id="st">&middot; idle (tap Watch)</span> &nbsp; <a href="#">? Help</a>
+</div>
+</body></html>

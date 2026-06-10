@@ -4,6 +4,8 @@ Drive a terminal — or a live **Claude Code** session — from a **2010 Kindle*
 
 > Built because the Kindle 3 e-ink browser (`AppleWebKit/531`, 2010) renders HTML and runs basic JS, but has **no WebGL and no working WebSocket** — so every modern web terminal (ttyd, Blit, wetty, gotty) shows a blank page. This one is dumb on purpose and just works.
 
+![The kindle-term UI, rendered at the Kindle 3's 600×800 screen](docs/screenshot.png)
+
 ## How it works
 
 ```
@@ -22,6 +24,7 @@ This serves a **writable terminal**, i.e. **remote code execution** for anyone w
 
 - Keep it bound to **`127.0.0.1`** (the default).
 - **Always** put authentication in front — Cloudflare Access, an authenticated reverse proxy, or a VPN. Never expose it raw to the internet.
+- The POST endpoints are **CSRF-protected** (double-submit token: a cookie + a hidden form field that must match), so a cross-origin page can't drive your terminal using your authenticated session. Note that auth alone does **not** stop CSRF — the browser attaches your auth cookie automatically — which is why the token is built in.
 
 ## Quick start (local)
 
