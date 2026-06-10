@@ -6,6 +6,15 @@ Drive a live **Claude Code** session — or any terminal — from a **2010 Kindl
 
 ![The kindle-term UI, rendered at the Kindle 3's 600×800 screen](docs/screenshot.png)
 
+## Why a Kindle?
+
+Because of *where* you can use it. E-ink shines exactly where phones and laptops fail:
+
+- **Readable in direct sunlight.** E-ink is reflective like paper — the brighter the sun, the *better* it looks, while a phone or laptop screen washes out to glare. Read your terminal on the beach at noon.
+- **Battery measured in weeks.** An e-reader only draws power when the screen actually changes, so it barely sips. Keep a long Claude Code run going all afternoon — or all weekend — with no charger in sight.
+
+Keep a Claude Code session running on a box at home, then check in on it (or drive it) from a Kindle out in the sun, on a battery that won't quit. No glare, no dead laptop in the sand.
+
 ## How it works
 
 ```
