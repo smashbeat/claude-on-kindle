@@ -1,6 +1,6 @@
-# kindle-term
+# Claude on Kindle
 
-Drive a terminal — or a live **Claude Code** session — from a **2010 Kindle**, or honestly any browser back to ~2009. No WebSocket, no JS framework, no canvas. Just HTML, forms, and `tmux`.
+Drive a live **Claude Code** session — or any terminal — from a **2010 Kindle**, or honestly any browser back to ~2009. No WebSocket, no JS framework, no canvas. Just HTML, forms, and `tmux`.
 
 > Built because the Kindle 3 e-ink browser (`AppleWebKit/531`, 2010) renders HTML and runs basic JS, but has **no WebGL and no working WebSocket** — so every modern web terminal (ttyd, Blit, wetty, gotty) shows a blank page. This one is dumb on purpose and just works.
 
