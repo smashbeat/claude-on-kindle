@@ -12,20 +12,16 @@ Config (env vars, defaults shown):
   KT_AUTH_HEADER=       optional: require this request header (set by your trusted proxy)
   KT_AUTH_SECRET=       optional: the value that header must equal (defense in depth)
 
+Two-device "keyboard" trick: the Kindle can't pair a Bluetooth keyboard, but a phone
+can. Open this app in KEYBOARD MODE on the phone (append ?kbd=1) and in normal mode on
+the Kindle. The phone (modern browser) submits via fetch without reloading, so the input
+keeps focus and a BT keyboard types continuously; the Kindle just displays the output.
+
 WARNING: this exposes a WRITABLE terminal == remote code execution. Bind to 127.0.0.1
 and always put it behind authentication (Cloudflare Access, an authenticated reverse
-proxy, or a VPN). Never expose it directly to the internet. Note that "bound to
-127.0.0.1" is NOT a boundary against other processes/containers on the same host --
-see README "Deployment security". Run it as a non-root user.
-
-CSRF: because the POST endpoints inject keystrokes, they are protected with a
-double-submit token (a cookie + a hidden form field that must match). This blocks a
-cross-origin page from driving the terminal using your authenticated session -- auth
-alone does NOT stop that, since the browser attaches your auth cookie automatically.
-The token is plain HTML (no JS), so it still works on a 2010 Kindle browser. (CSRF does
-NOT protect against an attacker who can reach the port directly and craft the whole
-request -- e.g. a co-located container; for that, set KT_AUTH_HEADER/KT_AUTH_SECRET and
-have your trusted proxy inject the header, and/or isolate the port.)
+proxy, or a VPN). "Bound to 127.0.0.1" is NOT a boundary against other processes on the
+same host -- see README "Deployment security". Run it as a non-root user. POSTs are
+CSRF-protected (double-submit token), since auth alone does not stop CSRF.
 """
 import os, subprocess, html, urllib.parse, hashlib, secrets
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -36,9 +32,6 @@ PORT    = int(os.environ.get("KT_PORT", "8882"))
 TITLE   = os.environ.get("KT_TITLE", SESSION)
 SECURE  = os.environ.get("KT_SECURE", "") not in ("", "0", "false", "no")
 MAX_BODY = 65536  # keystroke POSTs are tiny; reject anything larger
-# Optional defense-in-depth: require a secret header that only your trusted proxy
-# (e.g. a Cloudflare Transform Rule) injects, so a process reaching the port directly
-# (a co-located container) is rejected. Leave unset to disable.
 AUTH_HEADER = os.environ.get("KT_AUTH_HEADER", "")
 AUTH_SECRET = os.environ.get("KT_AUTH_SECRET", "")
 
@@ -70,22 +63,22 @@ form{margin:4px 0;display:inline}
 #st{color:#555} a{color:#000}
 </style></head><body>
 <pre>__SCREEN__</pre>
-<form method="post" action="/send"><input type="hidden" name="csrf" value="__CSRF__">
-<input type="text" id="cmd" name="text" autocomplete="off" placeholder="type then Send">
+<form method="post" action="/send"><input type="hidden" name="csrf" value="__CSRF__"><input type="hidden" name="kbd" value="__KBD__">
+<input type="text" id="cmd" name="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="type then Send">
 <button name="enter" value="1">Send&#9166;</button>
 <button name="enter" value="0">Send</button></form>
 <div>
-<form method="post" action="/key"><input type="hidden" name="csrf" value="__CSRF__"><button name="k" value="Enter">Enter</button>
+<form method="post" action="/key"><input type="hidden" name="csrf" value="__CSRF__"><input type="hidden" name="kbd" value="__KBD__"><button name="k" value="Enter">Enter</button>
 <button name="k" value="Up">&#8593;</button><button name="k" value="Down">&#8595;</button>
 <button name="k" value="Escape">Esc</button><button name="k" value="Tab">Tab</button>
 <button name="k" value="C-c">^C</button><button name="k" value="BSpace">&#9003;</button></form>
 <form method="get" action="/"><button>&#8635; Refresh</button></form>
 <form method="get" action="/"><input type="hidden" name="watch" value="1"><button>&#9654; Watch</button></form>
-<span id="st"></span> &nbsp; <a href="/help">? Help</a>
+<span id="st"></span> &nbsp; <a href="/?kbd=1">keyboard</a> &nbsp; <a href="/help">? Help</a>
 </div>
 <a id="bottom"></a>
 <script>
-var KT_HASH="__HASH__", MAXSTABLE=6, CAP=120;
+var KT_HASH="__HASH__", MAXSTABLE=6, CAP=120, CSRF="__CSRF__", KBD=__KBD__;
 function getC(k){var m=document.cookie.match(new RegExp('(?:^|; )'+k+'=([^;]*)'));return m?m[1]:'';}
 function setC(k,v){document.cookie=k+'='+v+';path=/;max-age=86400';}
 function busy(){var i=document.getElementById('cmd');return document.activeElement===i||(i&&i.value!=='');}
@@ -96,9 +89,27 @@ var stable=(cur===prev)?(parseInt(getC('kt_stable')||'0',10)+1):0;
 var n=parseInt(getC('kt_n')||'0',10)+1;
 if(location.search.indexOf('watch=1')>=0){stable=0;n=0;}
 setC('kt_h',cur);setC('kt_stable',stable);setC('kt_n',n);
-var watching=(stable<MAXSTABLE && n<CAP);
-document.getElementById('st').innerHTML=watching?'&middot; watching':'&middot; idle (tap Watch)';
+var watching=(stable<MAXSTABLE && n<CAP) && !KBD;
+document.getElementById('st').innerHTML=KBD?'&middot; keyboard mode (type away)':(watching?'&middot; watching':'&middot; idle (tap Watch)');
 if(watching){(function arm(){setTimeout(function(){if(busy()){arm();}else{location.href='/';}},5000);})();}
+// Keyboard mode (phone): submit via fetch so the page never reloads and the input
+// keeps focus -> a Bluetooth keyboard types continuously. Kindle never uses this.
+if(KBD){
+  var ci=document.getElementById('cmd');
+  if(ci){
+    try{ci.focus();}catch(e){}
+    if(window.fetch){
+      ci.form.addEventListener('submit',function(e){
+        e.preventDefault();
+        var b='csrf='+encodeURIComponent(CSRF)+'&kbd=1&text='+encodeURIComponent(ci.value);
+        fetch('/send',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b,credentials:'same-origin'})
+          .then(function(){ci.value='';try{ci.focus();}catch(e){}})
+          .catch(function(){try{ci.focus();}catch(e){}});
+        return false;
+      });
+    }
+  }
+}
 </script>
 </body></html>"""
 
@@ -123,15 +134,13 @@ h2{font-size:20px;border-bottom:1px solid #000;margin-top:18px}
 <h2>Viewing</h2>
 <p><span class="k">&#8635; Refresh</span> &mdash; re-read the screen once (sends nothing).</p>
 <p><span class="k">&#9654; Watch</span> &mdash; auto-refresh: reloads every ~5s while the screen keeps changing, then auto-stops ~30s after it goes still. Pauses while you type.</p>
-<p><b>&middot; watching / &middot; idle</b> &mdash; whether auto-refresh is running now. "idle" means stopped &mdash; tap Watch to resume.</p>
-<h2>If you're driving Claude Code</h2>
-<p>Type your question &#8594; <span class="k">Send&#9166;</span> &#8594; it watches while Claude replies &#8594; goes idle when done.</p>
-<p>To restart Claude or switch account: exit Claude (type <b>exit</b>, or tap <span class="k">^C</span> twice) to reach the shell, then type <b>claude</b> (launch), or the account-switcher commands if you set them up.</p>
-<p><a href="/">&#8592; Back to terminal</a></p>
+<h2>Bluetooth keyboard (two devices)</h2>
+<p>The Kindle can't pair a BT keyboard, but a phone can. Pair the keyboard to your <b>phone</b>, open this page with <b>?kbd=1</b> on the phone ("keyboard mode"), and open it normally on the Kindle. Type on the phone (input keeps focus, so you can type continuously); read the output on the Kindle's sunlit e-ink.</p>
+<p><a href="/">&#8592; Back to terminal</a> &nbsp; <a href="/?kbd=1">keyboard mode</a></p>
 </body></html>"""
 
 class H(BaseHTTPRequestHandler):
-    server_version = "kt"      # don't advertise BaseHTTP/Python versions
+    server_version = "kt"
     sys_version = ""
 
     def _send(self, body, cookies=None):
@@ -150,14 +159,13 @@ class H(BaseHTTPRequestHandler):
         self.end_headers()
 
     def _edge_ok(self):
-        # When configured, require the proxy-injected secret header on every request.
-        # A process reaching the port directly (bypassing the proxy) won't have it.
         if not (AUTH_HEADER and AUTH_SECRET):
             return True
         got = self.headers.get(AUTH_HEADER, "")
         return bool(got) and secrets.compare_digest(got, AUTH_SECRET)
 
     def _page(self):
+        kbd = "1" if "kbd=1" in self.path else "0"
         tok = cookie_val(self.headers, "kt_csrf")
         cookies = None
         if not tok:
@@ -170,6 +178,7 @@ class H(BaseHTTPRequestHandler):
         h = hashlib.md5(scr.encode()).hexdigest()[:12]
         self._send(PAGE.replace("__TITLE__", html.escape(TITLE))
                        .replace("__HASH__", h)
+                       .replace("__KBD__", kbd)
                        .replace("__CSRF__", tok)
                        .replace("__SCREEN__", html.escape(scr)), cookies)
 
@@ -192,14 +201,12 @@ class H(BaseHTTPRequestHandler):
         if n < 0 or n > MAX_BODY:
             self._deny(413); return
         d = urllib.parse.parse_qs(self.rfile.read(n).decode())
-        # CSRF: the hidden form token must match the cookie (double-submit).
         cookie_tok = cookie_val(self.headers, "kt_csrf")
         form_tok = d.get("csrf", [""])[0]
         if not cookie_tok or not secrets.compare_digest(cookie_tok, form_tok):
             self._deny(403); return
         ensure()
-        # `--` stops tmux option parsing, so a value starting with `-` is treated
-        # as keys/text, never as a tmux flag.
+        # `--` stops tmux option parsing, so a value starting with `-` is treated as keys.
         if self.path == "/send":
             t = d.get("text", [""])[0]
             if t:
@@ -210,7 +217,8 @@ class H(BaseHTTPRequestHandler):
             k = d.get("k", [""])[0]
             if k:
                 tmux("send-keys", "-t", SESSION, "--", k)
-        self._redir("/?watch=1")
+        # keyboard mode posts come from fetch (response ignored); plain posts get a redirect
+        self._redir("/?kbd=1" if d.get("kbd", ["0"])[0] == "1" else "/?watch=1")
 
     def log_message(self, *a):
         pass

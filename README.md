@@ -74,6 +74,10 @@ For a tmux session that survives reboots, see `systemd/claude-session.service.ex
 
 A full in-app guide lives at `/help`.
 
+## Bluetooth keyboard (two devices)
+
+The Kindle can't pair a Bluetooth keyboard — but a phone can, and this app is just a web page. So pair the keyboard to your **phone**, open the app on the phone in **keyboard mode** (`?kbd=1`, or tap "keyboard"), and open it normally on the **Kindle**. In keyboard mode the phone submits via `fetch` so the input never loses focus — type continuously on the real keyboard, and read the output on the Kindle's sunlit e-ink. Same idea as [SolarWriter](https://solarwriter.msol.io/) / [PiWrite](https://github.com/rberenguel/PiWrite), reusing the terminal you already have.
+
 ## Bonus: Claude account switcher (optional)
 
 If you drive **Claude Code** and keep two accounts (e.g. work + personal) and don't want to mix them, `bin/claude-acct` snapshots and swaps the Claude login (`~/.claude/.credentials.json`) cleanly — leaving your MCP/plugin logins untouched — and `bin/cwork` / `bin/cpers` switch + relaunch. Claude-specific; skip it if you're driving a plain shell. Setup is in the header of `bin/claude-acct`.
