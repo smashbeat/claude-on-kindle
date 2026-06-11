@@ -13,15 +13,14 @@ Config (env vars, defaults shown):
   KT_AUTH_SECRET=       optional: the value that header must equal (defense in depth)
 
 Two-device "keyboard" trick: the Kindle can't pair a Bluetooth keyboard, but a phone
-can. Open this app in KEYBOARD MODE on the phone (append ?kbd=1) and in normal mode on
-the Kindle. The phone (modern browser) submits via fetch without reloading, so the input
-keeps focus and a BT keyboard types continuously; the Kindle just displays the output.
+can. Open ?kbd=1 on the phone -- a dark, minimal "controller" that keeps the screen
+awake (Wake Lock) and submits via fetch (so the input never loses focus and a BT
+keyboard types continuously). Open the normal page on the Kindle for the output.
 
 WARNING: this exposes a WRITABLE terminal == remote code execution. Bind to 127.0.0.1
-and always put it behind authentication (Cloudflare Access, an authenticated reverse
-proxy, or a VPN). "Bound to 127.0.0.1" is NOT a boundary against other processes on the
-same host -- see README "Deployment security". Run it as a non-root user. POSTs are
-CSRF-protected (double-submit token), since auth alone does not stop CSRF.
+and always put it behind authentication. "Bound to 127.0.0.1" is NOT a boundary against
+other processes on the same host -- see README "Deployment security". Run it non-root.
+POSTs are CSRF-protected (double-submit token), since auth alone does not stop CSRF.
 """
 import os, subprocess, html, urllib.parse, hashlib, secrets
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -63,12 +62,12 @@ form{margin:4px 0;display:inline}
 #st{color:#555} a{color:#000}
 </style></head><body>
 <pre>__SCREEN__</pre>
-<form method="post" action="/send"><input type="hidden" name="csrf" value="__CSRF__"><input type="hidden" name="kbd" value="__KBD__">
+<form method="post" action="/send"><input type="hidden" name="csrf" value="__CSRF__">
 <input type="text" id="cmd" name="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="type then Send">
 <button name="enter" value="1">Send&#9166;</button>
 <button name="enter" value="0">Send</button></form>
 <div>
-<form method="post" action="/key"><input type="hidden" name="csrf" value="__CSRF__"><input type="hidden" name="kbd" value="__KBD__"><button name="k" value="Enter">Enter</button>
+<form method="post" action="/key"><input type="hidden" name="csrf" value="__CSRF__"><button name="k" value="Enter">Enter</button>
 <button name="k" value="Up">&#8593;</button><button name="k" value="Down">&#8595;</button>
 <button name="k" value="Escape">Esc</button><button name="k" value="Tab">Tab</button>
 <button name="k" value="C-c">^C</button><button name="k" value="BSpace">&#9003;</button></form>
@@ -78,7 +77,7 @@ form{margin:4px 0;display:inline}
 </div>
 <a id="bottom"></a>
 <script>
-var KT_HASH="__HASH__", MAXSTABLE=6, CAP=120, CSRF="__CSRF__", KBD=__KBD__;
+var KT_HASH="__HASH__", MAXSTABLE=6, CAP=120;
 function getC(k){var m=document.cookie.match(new RegExp('(?:^|; )'+k+'=([^;]*)'));return m?m[1]:'';}
 function setC(k,v){document.cookie=k+'='+v+';path=/;max-age=86400';}
 function busy(){var i=document.getElementById('cmd');return document.activeElement===i||(i&&i.value!=='');}
@@ -89,32 +88,55 @@ var stable=(cur===prev)?(parseInt(getC('kt_stable')||'0',10)+1):0;
 var n=parseInt(getC('kt_n')||'0',10)+1;
 if(location.search.indexOf('watch=1')>=0){stable=0;n=0;}
 setC('kt_h',cur);setC('kt_stable',stable);setC('kt_n',n);
-var watching=(stable<MAXSTABLE && n<CAP) && !KBD;
-document.getElementById('st').innerHTML=KBD?'&middot; keyboard mode (type away)':(watching?'&middot; watching':'&middot; idle (tap Watch)');
+var watching=(stable<MAXSTABLE && n<CAP);
+document.getElementById('st').innerHTML=watching?'&middot; watching':'&middot; idle (tap Watch)';
 if(watching){(function arm(){setTimeout(function(){if(busy()){arm();}else{location.href='/';}},5000);})();}
-// Keyboard mode (phone): submit via fetch so the page never reloads and the input
-// keeps focus -> a Bluetooth keyboard types continuously. Kindle never uses this.
-if(KBD){
-  var ci=document.getElementById('cmd');
-  if(ci){
-    try{ci.focus();}catch(e){}
-    if(window.fetch){
-      ci.form.addEventListener('submit',function(e){
-        e.preventDefault();
-        var b='csrf='+encodeURIComponent(CSRF)+'&kbd=1&text='+encodeURIComponent(ci.value);
-        fetch('/send',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b,credentials:'same-origin'})
-          .then(function(){ci.value='';try{ci.focus();}catch(e){}})
-          .catch(function(){try{ci.focus();}catch(e){}});
-        return false;
-      });
-    }
-  }
-  // Keep the phone screen awake so the suspended tab doesn't stop receiving keys.
-  var _wl=null;
-  function _lock(){if(navigator.wakeLock){navigator.wakeLock.request('screen').then(function(s){_wl=s;}).catch(function(){});}}
-  _lock();
-  document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible'){_lock();if(ci){try{ci.focus();}catch(e){}}}});
+</script>
+</body></html>"""
+
+# Dark, minimal controller for a phone hosting a Bluetooth keyboard. No terminal
+# display (read that on the Kindle); near-black to save OLED battery; keeps the screen
+# awake; submits via fetch so the input never loses focus.
+KBD_PAGE = r"""<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>kbd</title><style>
+html,body{background:#000;color:#555;font-family:monospace;margin:0}
+#cmd{background:#0b0b0b;color:#9a9a9a;border:1px solid #222;font-size:20px;padding:11px;margin:7px;width:92%;box-sizing:border-box}
+button{background:#0b0b0b;color:#888;border:1px solid #222;font-size:17px;padding:10px 12px;margin:3px}
+form{display:inline} #st{color:#333;font-size:13px;margin:8px} a{color:#555}
+</style></head><body>
+<form id="sf" method="post" action="/send"><input type="hidden" name="csrf" value="__CSRF__"><input type="hidden" name="kbd" value="1">
+<input type="text" id="cmd" name="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="type &mdash; output shows on the Kindle"></form>
+<div>
+<form method="post" action="/key"><input type="hidden" name="csrf" value="__CSRF__"><input type="hidden" name="kbd" value="1"><button name="k" value="Enter">Enter</button>
+<button name="k" value="Up">&#8593;</button><button name="k" value="Down">&#8595;</button>
+<button name="k" value="Escape">Esc</button><button name="k" value="Tab">Tab</button>
+<button name="k" value="C-c">^C</button><button name="k" value="BSpace">&#9003;</button></form>
+</div>
+<div id="st">keyboard mode &middot; screen kept awake &middot; <a href="/">exit</a></div>
+<script>
+var CSRF="__CSRF__", ci=document.getElementById('cmd');
+try{ci.focus();}catch(e){}
+if(window.fetch){
+  document.getElementById('sf').addEventListener('submit',function(e){
+    e.preventDefault();
+    var b='csrf='+encodeURIComponent(CSRF)+'&kbd=1&text='+encodeURIComponent(ci.value);
+    fetch('/send',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b,credentials:'same-origin'})
+      .then(function(){ci.value='';try{ci.focus();}catch(e){}}).catch(function(){try{ci.focus();}catch(e){}});
+    return false;
+  });
+  var kb=document.querySelectorAll('button[name=k]');
+  for(var i=0;i<kb.length;i++){kb[i].addEventListener('click',function(e){
+    e.preventDefault();
+    var b='csrf='+encodeURIComponent(CSRF)+'&kbd=1&k='+encodeURIComponent(this.value);
+    fetch('/key',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b,credentials:'same-origin'})
+      .then(function(){try{ci.focus();}catch(e){}}).catch(function(){});
+    return false;
+  });}
 }
+var _wl=null;
+function _lock(){if(navigator.wakeLock){navigator.wakeLock.request('screen').then(function(s){_wl=s;}).catch(function(){});}}
+_lock();
+document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible'){_lock();try{ci.focus();}catch(e){}}});
 </script>
 </body></html>"""
 
@@ -140,7 +162,7 @@ h2{font-size:20px;border-bottom:1px solid #000;margin-top:18px}
 <p><span class="k">&#8635; Refresh</span> &mdash; re-read the screen once (sends nothing).</p>
 <p><span class="k">&#9654; Watch</span> &mdash; auto-refresh: reloads every ~5s while the screen keeps changing, then auto-stops ~30s after it goes still. Pauses while you type.</p>
 <h2>Bluetooth keyboard (two devices)</h2>
-<p>The Kindle can't pair a BT keyboard, but a phone can. Pair the keyboard to your <b>phone</b>, open this page with <b>?kbd=1</b> on the phone ("keyboard mode"), and open it normally on the Kindle. Type on the phone (input keeps focus, so you can type continuously); read the output on the Kindle's sunlit e-ink.</p>
+<p>The Kindle can't pair a BT keyboard, but a phone can. Pair the keyboard to your <b>phone</b>, open this page with <b>?kbd=1</b> on the phone (a dark "controller" that keeps the screen awake and lets you type continuously), and open it normally on the Kindle. Type on the phone; read the output on the Kindle's sunlit e-ink. Turn the phone's brightness down &mdash; you only look at the Kindle.</p>
 <p><a href="/">&#8592; Back to terminal</a> &nbsp; <a href="/?kbd=1">keyboard mode</a></p>
 </body></html>"""
 
@@ -169,21 +191,22 @@ class H(BaseHTTPRequestHandler):
         got = self.headers.get(AUTH_HEADER, "")
         return bool(got) and secrets.compare_digest(got, AUTH_SECRET)
 
-    def _page(self):
-        kbd = "1" if "kbd=1" in self.path else "0"
+    def _token(self):
         tok = cookie_val(self.headers, "kt_csrf")
-        cookies = None
-        if not tok:
-            tok = secrets.token_urlsafe(16)
-            flags = "Path=/; SameSite=Strict; HttpOnly; Max-Age=31536000"
-            if SECURE:
-                flags += "; Secure"
-            cookies = ["kt_csrf=%s; %s" % (tok, flags)]
+        if tok:
+            return tok, None
+        tok = secrets.token_urlsafe(16)
+        flags = "Path=/; SameSite=Strict; HttpOnly; Max-Age=31536000" + ("; Secure" if SECURE else "")
+        return tok, ["kt_csrf=%s; %s" % (tok, flags)]
+
+    def _page(self):
+        tok, cookies = self._token()
+        if "kbd=1" in self.path:
+            self._send(KBD_PAGE.replace("__CSRF__", tok), cookies); return
         scr = capture()
         h = hashlib.md5(scr.encode()).hexdigest()[:12]
         self._send(PAGE.replace("__TITLE__", html.escape(TITLE))
                        .replace("__HASH__", h)
-                       .replace("__KBD__", kbd)
                        .replace("__CSRF__", tok)
                        .replace("__SCREEN__", html.escape(scr)), cookies)
 
@@ -222,7 +245,7 @@ class H(BaseHTTPRequestHandler):
             k = d.get("k", [""])[0]
             if k:
                 tmux("send-keys", "-t", SESSION, "--", k)
-        # keyboard mode posts come from fetch (response ignored); plain posts get a redirect
+        # fetch posts ignore the redirect; plain (no-JS) posts follow it
         self._redir("/?kbd=1" if d.get("kbd", ["0"])[0] == "1" else "/?watch=1")
 
     def log_message(self, *a):
