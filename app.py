@@ -109,6 +109,11 @@ if(KBD){
       });
     }
   }
+  // Keep the phone screen awake so the suspended tab doesn't stop receiving keys.
+  var _wl=null;
+  function _lock(){if(navigator.wakeLock){navigator.wakeLock.request('screen').then(function(s){_wl=s;}).catch(function(){});}}
+  _lock();
+  document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible'){_lock();if(ci){try{ci.focus();}catch(e){}}}});
 }
 </script>
 </body></html>"""
